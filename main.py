@@ -6,3 +6,4 @@ GS_PORT = 7777
 
 ls = LoginServer()
 ls.connect(IP, LS_PORT)
+ls.login("admin", "password")
