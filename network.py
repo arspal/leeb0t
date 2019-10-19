@@ -18,6 +18,8 @@ class LoginServer(BaseConn):
         super().__init__()
         self.session_id = 0
         self.scrambled_rsa_mod = b""
+        self.account_id = 0
+        self.auth_key = 0
 
     def connect(self, ip, port):
         self.sock.connect((ip, port))
@@ -27,6 +29,7 @@ class LoginServer(BaseConn):
 
         packets.auth_gg["fields"]["session_id"] = self.session_id
 
+        # @fix: all my packet handling only accounts for the 'happy' path
         self.send_packet(packets.auth_gg)
         self.recv_packet()
 
@@ -38,7 +41,7 @@ class LoginServer(BaseConn):
 
         # cleanup space for rsa encoded data
         self.clean_buffer(0, 128)
-        # TODO(Arseny): there is some unknown data in packets, that we need to specify as we emulate the client
+        # @todo(Arseny): there is some unknown data in packets, that we need to specify as we emulate the client
         packet_container.contents[91] = 0x24
         # server expects login data at exactly these bytes in user_data
         packet_container.contents[94:94 + len(username)] = bytes(username, "utf-8")
@@ -49,6 +52,14 @@ class LoginServer(BaseConn):
         packets.req_auth["fields"]["session_id"] = self.session_id
 
         self.send_packet(packets.req_auth)
+        # @cleanup: these two honestly can be a single function call
+        self.recv_packet()
+        self.account_id, self.auth_key, _forbidden_servers = self.read_packet(packets.login_ok)
+
+        packets.req_server_list["fields"]["account_id"] = self.account_id
+        packets.req_server_list["fields"]["auth_key"] = self.auth_key
+
+        self.send_packet(packets.req_server_list)
 
     def recv_packet(self):
         # get size of the packet
