@@ -70,6 +70,12 @@ def dec_xor(raw: bytearray, size: int, offset: int = 0):
 
 
 def enc_rsa_no_pad(msg: bytearray, scrambled_mod: bytes, exp: int = DEF_RSA_EXPONENT) -> bytes:
+    """
+    This is legacy RSA encoding without padding.
+    VERY insecure, should not be used in any other code!
+
+    Unscrambles provided modulo and uses it to encode the message (basically pow).
+    """
     mod = unscramble_and_parse_rsa_mod(scrambled_mod)
     # should be 128 bytes 99.99% of the time
     key_len = mod.bit_length() // 8
