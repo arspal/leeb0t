@@ -60,6 +60,14 @@ class LoginServer(BaseConn):
         packets.req_server_list["fields"]["auth_key"] = self.auth_key
 
         self.send_packet(packets.req_server_list)
+        self.recv_packet()
+
+        packets.req_server_login["fields"]["account_id"] = self.account_id
+        packets.req_server_login["fields"]["auth_key"] = self.auth_key
+        # server selection is hardcoded for now
+        packets.req_server_login["fields"]["game_server"] = 0x02
+        self.send_packet(packets.req_server_login)
+        self.recv_packet()
 
     def recv_packet(self):
         # get size of the packet

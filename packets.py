@@ -47,6 +47,17 @@ req_server_list = {
     "struct": Struct("< B i i B")
 }
 
+req_server_login = {
+    "name": "req_server_login",
+    "fields": {
+        "op_code": 0x02,
+        "account_id": None,
+        "auth_key": None,
+        "game_server": None
+    },
+    "struct": Struct("< B i i B")
+}
+
 HEADER_SIZE = 2
 BUFFER_SIZE = 65535
 
