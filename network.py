@@ -1,6 +1,7 @@
 import socket
-import crypt
+import encrypt
 import packets
+import binascii
 
 packet_container = packets.PacketContainer()
 USERNAME_MAX_LEN = 14
@@ -10,7 +11,7 @@ PASSWORD_MAX_LEN = 16
 class BaseConn:
     def __init__(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.cipher = crypt.Blowfish()
+        self.cipher = encrypt.Blowfish()
 
 
 class LoginServer(BaseConn):
@@ -25,7 +26,7 @@ class LoginServer(BaseConn):
         self.sock.connect((ip, port))
         self.recv_packet()
         self.session_id, self.scrambled_rsa_mod, new_blowfish_key = self.read_packet(packets.init)
-        self.cipher = crypt.Blowfish(new_blowfish_key)
+        self.cipher = encrypt.Blowfish(new_blowfish_key)
 
         packets.auth_gg["fields"]["session_id"] = self.session_id
 
@@ -47,8 +48,8 @@ class LoginServer(BaseConn):
         packet_container.contents[94:94 + len(username)] = bytes(username, "utf-8")
         packet_container.contents[108:108 + len(password)] = bytes(password, "utf-8")
 
-        packets.req_auth["fields"]["user_data"] = crypt.enc_rsa_no_pad(packet_container.contents[0:128],
-                                                                       self.scrambled_rsa_mod)
+        packets.req_auth["fields"]["user_data"] = encrypt.enc_rsa_no_pad(packet_container.contents[0:128],
+                                                                         self.scrambled_rsa_mod)
         packets.req_auth["fields"]["session_id"] = self.session_id
 
         self.send_packet(packets.req_auth)
@@ -69,6 +70,8 @@ class LoginServer(BaseConn):
         self.send_packet(packets.req_server_login)
         self.recv_packet()
 
+        return self.read_packet(packets.play_ok) + (self.account_id, self.auth_key)
+
     def recv_packet(self):
         # get size of the packet
         self.sock.recv_into(packet_container.header, 0)
@@ -80,7 +83,7 @@ class LoginServer(BaseConn):
         self.cipher.decrypt(packet_container.contents, packet_container.size)
 
         if packet["name"] == "init":
-            crypt.dec_xor(packet_container.contents, packet_container.size)
+            encrypt.dec_xor(packet_container.contents, packet_container.size)
 
         return packet_container.read_packet(packet)
 
@@ -94,7 +97,7 @@ class LoginServer(BaseConn):
         size += 4
         self.clean_buffer(pad_start, size)
 
-        crypt.append_checksum(packet_container.contents, size)
+        encrypt.append_checksum(packet_container.contents, size)
         self.clean_buffer(size, size + 12)
         size += 12
         self.cipher.encrypt(packet_container.contents, size)
@@ -109,5 +112,78 @@ class LoginServer(BaseConn):
 
 
 class GameServer(BaseConn):
+    def __init__(self):
+        super().__init__()
+        self.game_crypt = None
+
     def connect(self, ip, port):
         self.sock.connect((ip, port))
+
+    def start_loop(self, gs_session_id, gs_account_id, gs_id, ls_account_id, ls_auth_key):
+        self.send_packet(packets.send_protocol_ver)
+        self.recv_packet()
+
+        (cipher_key,) = self.read_packet(packets.version_check)
+
+        self.game_crypt = encrypt.GameCrypt(cipher_key)
+
+        packets.gs_req_login["fields"]["gs_account_id"] = gs_account_id
+        packets.gs_req_login["fields"]["gs_session_id"] = gs_session_id
+        packets.gs_req_login["fields"]["ls_account_id"] = ls_account_id
+        packets.gs_req_login["fields"]["ls_auth_key"] = ls_auth_key
+
+        self.send_enc_packet(packets.gs_req_login)
+        self.recv_packet()
+
+        self.send_enc_packet(packets.gs_req_game_start)
+        self.recv_packet()
+        self.recv_packet()
+
+        self.send_enc_packet(packets.gs_manor_list)
+        self.recv_packet()
+
+        self.send_enc_packet(packets.gs_fort_info)
+        self.send_enc_packet(packets.gs_keymap)
+        self.send_enc_packet(packets.gs_req_enter_world)
+
+        for i in range(0, 64):
+            self.recv_packet()
+            self.read_enc_packet_debug()
+
+    def recv_packet(self):
+        # get size of the packet
+        self.sock.recv_into(packet_container.header, 0)
+        # get contents
+        self.sock.recv_into(packet_container.contents, packet_container.calc_size())
+
+    def read_packet(self, packet):
+        return packet_container.read_packet(packet)
+
+    def read_enc_packet_debug(self):
+        self.game_crypt.decrypt(packet_container.contents, packet_container.size)
+        print(f"op: {str(binascii.hexlify(packet_container.contents[0:1]))}, size: {packet_container.size + 2}")
+
+    def read_enc_packet(self, packet):
+        self.game_crypt.decrypt(packet_container.contents, packet_container.size)
+        return packet_container.read_packet(packet)
+
+    def send_packet(self, packet):
+        packet_container.write_packet(packet)
+
+        size = packet_container.size
+
+        packet_container.header[0] = size + 2
+        packet_container.header[1] = 0x00
+
+        self.sock.send(packet_container.buf[:size + 2])
+
+    def send_enc_packet(self, packet):
+        packet_container.write_packet(packet)
+        self.game_crypt.encrypt(packet_container.contents, packet_container.size)
+
+        size = packet_container.size
+
+        packet_container.header[0] = size + 2
+        packet_container.header[1] = 0x00
+
+        self.sock.send(packet_container.buf[:size + 2])
