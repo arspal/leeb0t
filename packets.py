@@ -23,9 +23,8 @@ play_ok = {
 version_check = {
     "name": "version_check",
     # "fields": ("cipher_key",),
-    "struct": Struct("< x x q")
+    "struct": Struct("< x x 8s")
 }
-
 
 auth_gg = {
     "name": "auth_gg",
@@ -104,9 +103,20 @@ gs_fort_info = {
     "struct": Struct("< 3s")
 }
 
-
-
-
+gs_move_to_loc = {
+    "name": "move_to_loc",
+    "fields": {
+        "op_code": 0x0F,
+        "dest_x": 0,
+        "dest_y": 0,
+        "dest_z": 0,
+        "curr_x": 0,
+        "curr_y": 0,
+        "curr_z": 0,
+        "controller": 0x01  # controller mouse
+    },
+    "struct": Struct("< B i i i i i i i")
+}
 
 req_auth = {
     "name": "req_auth",
@@ -150,19 +160,29 @@ class PacketContainer:
     def __init__(self, size=BUFFER_SIZE):
         self.buf = bytearray(size)
         self.size = 0
+        self.header_size = HEADER_SIZE
+        self.content_size = 0
 
         # setup memory views
-        mem_view = memoryview(self.buf)
-        self.header = mem_view[:HEADER_SIZE]
-        self.contents = mem_view[HEADER_SIZE:]
+        self._packet = memoryview(self.buf)
+        self.header = self._packet[:HEADER_SIZE]
+        self.contents = self._packet[HEADER_SIZE:]
 
     def calc_size(self):
         self.size = int.from_bytes(self.header, byteorder="little") - HEADER_SIZE
         return self.size
 
+    def get_packet(self):
+        return self._packet[:self.size + HEADER_SIZE]
+
     def write_packet(self, packet):
+        packet_size = packet["struct"].size
+        self.contents[0:packet_size] = b"\x00" * packet_size
+
         packet["struct"].pack_into(self.contents, 0, *packet["fields"].values())
-        self.size = packet["struct"].size
+        self.size = packet_size
+
+        self.header[0] = self.size + HEADER_SIZE
 
     def read_packet(self, packet):
         return packet["struct"].unpack_from(self.contents)

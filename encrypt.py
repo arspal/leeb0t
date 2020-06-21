@@ -2,6 +2,7 @@ import blowfish
 
 DEF_RSA_EXPONENT = 65537
 STATIC_BLOWFISH_KEY = b"\x6b\x60\xcb\x5b\x82\xce\x90\xb1\xcc\x2b\x6c\x55\x6c\x6c\x6c\x6c"
+STATIC_BLOWFISH_GAME = b"\xc8\x27\x93\x01\xa1\x6c\x31\x97"
 
 
 class Blowfish:
@@ -23,11 +24,8 @@ class Blowfish:
 
 class GameCrypt:
     def __init__(self, first_key_part):
-        key = bytearray(
-            first_key_part.to_bytes(8, byteorder="little", signed=True) + b"\xc8\x27\x93\x01\xa1\x6c\x31\x97")
-
-        self._in_key = key
-        self._out_key = key
+        self._in_key = bytearray(first_key_part + STATIC_BLOWFISH_GAME)
+        self._out_key = bytearray(first_key_part + STATIC_BLOWFISH_GAME)
 
     def encrypt(self, raw: bytearray, size: int, offset: int = 0):
         temp = 0

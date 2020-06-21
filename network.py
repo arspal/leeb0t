@@ -1,26 +1,43 @@
-import socket
+from socket import socket, AF_INET, SOCK_STREAM
+import logging
+import threading
 import encrypt
 import packets
-import binascii
+
+logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.INFO,
+                    datefmt="%H:%M:%S")
 
 packet_container = packets.PacketContainer()
 USERNAME_MAX_LEN = 14
 PASSWORD_MAX_LEN = 16
 
 
-class BaseConn:
-    def __init__(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.cipher = encrypt.Blowfish()
+class Connection:
+    def __init__(self, ip, login_port, game_port):
+        self.config = {
+            "ip": ip,
+            "login_port": login_port,
+            "game_port": game_port
+        }
+
+        self.login_conn = LoginConn()
+        self.game_conn = GameConn()
+
+    def connect(self, login: str, password: str):
+        self.login_conn.connect(self.config["ip"], self.config["login_port"])
+        self.login_conn.login(login, password)
+
+        self.game_conn.connect(self.config["ip"], self.config["game_port"])
 
 
-class LoginServer(BaseConn):
+class LoginConn:
     def __init__(self):
-        super().__init__()
         self.session_id = 0
-        self.scrambled_rsa_mod = b""
+        self.scrambled_rsa_mod = bytearray()
         self.account_id = 0
         self.auth_key = 0
+        self.cipher = encrypt.Blowfish()
+        self.sock = socket(AF_INET, SOCK_STREAM)
 
     def connect(self, ip, port):
         self.sock.connect((ip, port))
@@ -30,30 +47,33 @@ class LoginServer(BaseConn):
 
         packets.auth_gg["fields"]["session_id"] = self.session_id
 
-        # @fix: all my packet handling only accounts for the 'happy' path
+        # todo @fix: all my packet handling only accounts for the 'happy' path
         self.send_packet(packets.auth_gg)
         self.recv_packet()
 
     def login(self, username: str, password: str):
-        if len(username) > USERNAME_MAX_LEN:
+        username_len = len(username)
+        password_len = len(password)
+
+        if username_len > USERNAME_MAX_LEN:
             raise ValueError(f"Username should be {USERNAME_MAX_LEN} characters or less")
-        if len(password) > PASSWORD_MAX_LEN:
+        if password_len > PASSWORD_MAX_LEN:
             raise ValueError(f"Password should be {PASSWORD_MAX_LEN} characters or less")
 
         # cleanup space for rsa encoded data
         self.clean_buffer(0, 128)
-        # @todo(Arseny): there is some unknown data in packets, that we need to specify as we emulate the client
+        # @todo: there is some unknown data in packets, that we need to specify as we emulate the client
         packet_container.contents[91] = 0x24
         # server expects login data at exactly these bytes in user_data
-        packet_container.contents[94:94 + len(username)] = bytes(username, "utf-8")
-        packet_container.contents[108:108 + len(password)] = bytes(password, "utf-8")
+        packet_container.contents[94:94 + username_len] = bytes(username, "utf-8")
+        packet_container.contents[108:108 + password_len] = bytes(password, "utf-8")
 
         packets.req_auth["fields"]["user_data"] = encrypt.enc_rsa_no_pad(packet_container.contents[0:128],
                                                                          self.scrambled_rsa_mod)
         packets.req_auth["fields"]["session_id"] = self.session_id
 
         self.send_packet(packets.req_auth)
-        # @cleanup: these two honestly can be a single function call
+        # todo @cleanup: Maybe receive and read packet in one function call
         self.recv_packet()
         self.account_id, self.auth_key, _forbidden_servers = self.read_packet(packets.login_ok)
 
@@ -65,12 +85,12 @@ class LoginServer(BaseConn):
 
         packets.req_server_login["fields"]["account_id"] = self.account_id
         packets.req_server_login["fields"]["auth_key"] = self.auth_key
-        # server selection is hardcoded for now
+        # todo: server selection is hardcoded for now
         packets.req_server_login["fields"]["game_server"] = 0x02
         self.send_packet(packets.req_server_login)
         self.recv_packet()
 
-        return self.read_packet(packets.play_ok) + (self.account_id, self.auth_key)
+        return self.read_packet(packets.play_ok)
 
     def recv_packet(self):
         # get size of the packet
@@ -101,7 +121,7 @@ class LoginServer(BaseConn):
         self.clean_buffer(size, size + 12)
         size += 12
         self.cipher.encrypt(packet_container.contents, size)
-        # TODO(Arseny): calculate packet size dynamically
+        # todo: calculate packet size dynamically
         packet_container.header[0] = size + 2
         packet_container.header[1] = 0x00
         self.sock.send(packet_container.buf[:size + 2])
@@ -111,10 +131,11 @@ class LoginServer(BaseConn):
         packet_container.contents[start:end] = b"\x00" * (end - start)
 
 
-class GameServer(BaseConn):
+class GameConn:
     def __init__(self):
-        super().__init__()
         self.game_crypt = None
+        self.sock = socket(AF_INET, SOCK_STREAM)
+        self.processed_packets = 0
 
     def connect(self, ip, port):
         self.sock.connect((ip, port))
@@ -146,9 +167,14 @@ class GameServer(BaseConn):
         self.send_enc_packet(packets.gs_keymap)
         self.send_enc_packet(packets.gs_req_enter_world)
 
-        for i in range(0, 64):
+        loop_thread = threading.Thread(target=self.collect_packets, daemon=True)
+        loop_thread.start()
+
+    def collect_packets(self):
+        while True:
             self.recv_packet()
-            self.read_enc_packet_debug()
+            # self.read_enc_packet_debug()
+            self.processed_packets += 1
 
     def recv_packet(self):
         # get size of the packet
@@ -161,7 +187,7 @@ class GameServer(BaseConn):
 
     def read_enc_packet_debug(self):
         self.game_crypt.decrypt(packet_container.contents, packet_container.size)
-        print(f"op: {str(binascii.hexlify(packet_container.contents[0:1]))}, size: {packet_container.size + 2}")
+        logging.info(f"op: {packet_container.contents[0:1].hex().upper()}, size: {packet_container.size + 2}")
 
     def read_enc_packet(self, packet):
         self.game_crypt.decrypt(packet_container.contents, packet_container.size)
