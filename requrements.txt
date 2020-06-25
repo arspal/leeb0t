@@ -1,0 +1,17 @@
+backcall==0.2.0
+blowfish==0.6.1
+colorama==0.4.3
+decorator==4.4.2
+ipython==7.15.0
+ipython-genutils==0.2.0
+jedi==0.17.0
+parso==0.7.0
+pickleshare==0.7.5
+prompt-toolkit==3.0.5
+pyasn1==0.4.7
+Pygments==2.6.1
+rsa==4.0
+six==1.15.0
+traitlets==4.3.3
+wcwidth==0.2.4
+yappi==1.0
