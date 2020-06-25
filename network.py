@@ -47,7 +47,6 @@ class LoginConn:
 
         packets.auth_gg["fields"]["session_id"] = self.session_id
 
-        # todo @fix: all my packet handling only accounts for the 'happy' path
         self.send_packet(packets.auth_gg)
         self.recv_packet()
 
@@ -62,9 +61,11 @@ class LoginConn:
 
         # cleanup space for rsa encoded data
         self.clean_buffer(0, 128)
-        # @todo: there is some unknown data in packets, that we need to specify as we emulate the client
+
+        # specify some unknown bytes that client expects
         packet_container.contents[91] = 0x24
-        # server expects login data at exactly these bytes in user_data
+
+        # login/pw should start at exactly these bytes
         packet_container.contents[94:94 + username_len] = bytes(username, "utf-8")
         packet_container.contents[108:108 + password_len] = bytes(password, "utf-8")
 
@@ -73,6 +74,7 @@ class LoginConn:
         packets.req_auth["fields"]["session_id"] = self.session_id
 
         self.send_packet(packets.req_auth)
+
         # todo @cleanup: Maybe receive and read packet in one function call
         self.recv_packet()
         self.account_id, self.auth_key, _forbidden_servers = self.read_packet(packets.login_ok)
@@ -85,6 +87,7 @@ class LoginConn:
 
         packets.req_server_login["fields"]["account_id"] = self.account_id
         packets.req_server_login["fields"]["auth_key"] = self.auth_key
+
         # todo: server selection is hardcoded for now
         packets.req_server_login["fields"]["game_server"] = 0x02
         self.send_packet(packets.req_server_login)

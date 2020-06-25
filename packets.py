@@ -156,6 +156,15 @@ HEADER_SIZE = 2
 BUFFER_SIZE = 65535
 
 
+class PacketBuffer:
+    def __init__(self, size=BUFFER_SIZE):
+        self._buf = bytearray(size)
+        self.size = 0
+        self.header_size = 0
+        self.content_size = 0
+        self.operation = 0x00
+
+
 class PacketContainer:
     def __init__(self, size=BUFFER_SIZE):
         self.buf = bytearray(size)
